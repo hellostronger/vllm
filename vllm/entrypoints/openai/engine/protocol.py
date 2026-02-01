@@ -3,6 +3,68 @@
 
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
+"""
+vLLM OpenAI API 协议模块
+
+本模块定义了 OpenAI API 请求/响应的 Pydantic 数据模型。
+
+协议设计原则：
+    1. 遵循 OpenAI API 规范
+    2. 允许额外字段（兼容性）
+    3. 静默忽略未知参数
+
+主要数据类：
+
+    基础类:
+        OpenAIBaseModel - 所有协议模型的基类
+        ErrorResponse - 错误响应
+        ErrorInfo - 错误详情
+
+    模型相关:
+        ModelPermission - 模型权限信息
+        ModelList - 模型列表响应
+        ModelCard - 模型信息
+
+    共享类型:
+        UsageInfo - Token 使用统计
+        PromptTokenUsageInfo - 提示词 token 详情
+        RequestResponseMetadata - 请求/响应元数据
+
+    工具调用:
+        FunctionCall - 函数调用
+        ToolCall - 工具调用
+        DeltaToolCall - 流式工具调用
+
+错误代码:
+    400 - Bad Request (参数错误)
+    401 - Unauthorized (未认证)
+    404 - Not Found (资源不存在)
+    429 - Rate Limit (请求过频)
+    500 - Internal Server Error (服务器错误)
+    503 - Service Unavailable (服务不可用)
+
+使用示例：
+
+    # 错误响应
+    error = ErrorResponse(
+        error=ErrorInfo(
+            message="Model not found",
+            type="invalid_request_error",
+            code=404
+        )
+    )
+
+    # Token 使用统计
+    usage = UsageInfo(
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30
+    )
+
+    # 序列化
+    json_response = error.model_dump_json()
+"""
+
 import time
 from typing import Any, ClassVar, Literal, TypeAlias
 

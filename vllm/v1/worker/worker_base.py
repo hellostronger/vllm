@@ -1,5 +1,49 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM Worker 基类模块
+
+Worker 是 vLLM 分布式推理中的基本执行单元。
+每个 GPU 设备上运行一个 Worker 进程，负责：
+1. 加载模型分片
+2. 执行模型推理
+3. 与其他 Worker 通信
+
+架构说明：
+
+    ┌─────────────────────────────────────────┐
+    │              Scheduler                  │
+    │         (运行在主进程中)                │
+    └──────────────────┬──────────────────────┘
+                       │
+                       │ 调度请求批次
+                       ▼
+    ┌─────────────────────────────────────────┐
+    │              Worker 0                   │
+    │         (GPU 0, rank 0)                 │
+    │  - 加载模型层 0 ~ N/2                   │
+    │  - 执行推理                             │
+    └──────────────────┬──────────────────────┘
+                       │
+                       │ 张量并行通信 (all-reduce)
+                       ▼
+    ┌─────────────────────────────────────────┐
+    │              Worker 1                   │
+    │         (GPU 1, rank 1)                 │
+    │  - 加载模型层 N/2 ~ N                   │
+    │  - 执行推理                             │
+    └─────────────────────────────────────────┘
+
+Worker 类型：
+    - 单 GPU 推理：单个 Worker
+    - 张量并行：多个 Worker，每個负责模型的一部分
+    - 数据并行：多个 Worker，每個加载完整模型
+
+重要概念：
+    - local_rank: 本地设备索引（0, 1, 2...）
+    - rank: 全局分布式索引
+    - driver_worker: 负责协调的 Worker（通常是 rank 0）
+"""
 
 import os
 from collections.abc import Callable
@@ -32,9 +76,23 @@ _R = TypeVar("_R")
 
 
 class WorkerBase:
-    """Worker interface that allows vLLM to cleanly separate implementations for
-    different hardware. Also abstracts control plane communication, e.g., to
-    communicate request metadata to other workers.
+    """
+    Worker 基类
+
+    Worker 是实际执行模型推理的组件。
+    基类定义了通用接口，具体实现由子类完成。
+
+    主要职责：
+    1. 初始化模型和运行环境
+    2. 执行模型推理（forward pass）
+    3. 管理 KV Cache
+    4. 处理张量并行通信
+
+    子类实现：
+    - CUDAWorker: NVIDIA GPU 实现
+    - ROCmWorker: AMD GPU 实现
+    - CPUWorker: CPU 实现
+    - TPUWorker: TPU 实现
     """
 
     def __init__(
@@ -46,15 +104,16 @@ class WorkerBase:
         is_driver_worker: bool = False,
     ) -> None:
         """
-        Initialize common worker components.
+        初始化 Worker 通用组件
 
-        Args:
-            vllm_config: Complete vLLM configuration
-            local_rank: Local device index
-            rank: Global rank in distributed setup
-            distributed_init_method: Distributed initialization method
-            is_driver_worker: Whether this worker handles driver
-                responsibilities
+        参数:
+            vllm_config: 完整的 vLLM 配置
+            local_rank: 本地 GPU 索引（0, 1, 2...）
+            rank: 分布式全局索引
+            distributed_init_method: 分布式初始化方法
+                - 常见格式: "tcp://host:port"
+            is_driver_worker: 是否为驱动 Worker
+                - 驱动 Worker 负责协调其他 Worker
         """
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
@@ -73,6 +132,7 @@ class WorkerBase:
 
         self.current_platform = current_platform
 
+        # 设置分布式配置
         self.parallel_config.rank = rank
         self.local_rank = local_rank
         self.rank = rank

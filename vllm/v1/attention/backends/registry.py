@@ -1,6 +1,61 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Attention backend registry"""
+"""
+vLLM 注意力后端注册表模块
+
+本模块定义了 vLLM 支持的各种注意力计算后端。
+
+什么是注意力后端？
+    注意力计算是 Transformer 模型的核心操作，但有多种实现方式：
+    - 原生 PyTorch 实现
+    - CUDA 优化库（FlashAttention、FlashInfer）
+    - Triton 自定义内核
+    - CPU 实现
+
+vLLM 支持的注意力后端：
+
+    CUDA 平台:
+        - FLASH_ATTN: FlashAttention，最常用的高效实现
+        - FLASHINFER: FlashInfer，针对推理优化
+        - FLASHMLA: FlashMLA，MLA 注意力优化
+        - TRITON_ATTN: Triton 实现，灵活可定制
+        - FLEX_ATTENTION: xFormers FlexAttention
+        - IPEX: Intel IPEX 优化
+
+    ROCm 平台 (AMD GPU):
+        - ROCM_ATTN: AMD GPU 通用实现
+        - ROCM_AITER_*: AMD 优化的迭代器实现
+
+    Mamba 模型专用:
+        - MAMBA1: Mamba 架构注意力
+        - MAMBA2: Mamba2 架构注意力
+        - SHORT_CONV: 短卷积注意力
+        - LINEAR: 线性注意力
+
+    其他:
+        - CPU_ATTN: CPU 实现
+        - NO_ATTENTION: 禁用注意力（特殊情况）
+
+自动选择逻辑：
+    1. 根据 GPU 类型选择（CUDA/ROCm/TPU）
+    2. 根据模型类型选择（Mamba 需要特殊后端）
+    3. 根据配置优先级选择
+    4. 检查依赖库是否可用
+
+后端选择优先级（通常）：
+    FlashInfer > FlashAttention > Triton > Torch SDPA
+
+使用自定义后端：
+
+    from vllm.v1.attention.backends.registry import (
+        AttentionBackendEnum,
+        register_backend
+    )
+
+    @register_backend(AttentionBackendEnum.CUSTOM)
+    class MyCustomBackend:
+        ...
+"""
 
 from collections.abc import Callable
 from enum import Enum, EnumMeta

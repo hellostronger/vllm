@@ -1,5 +1,70 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM OpenAI 兼容 API 服务模块
+
+本模块实现了 OpenAI 风格的 REST API 端点处理。
+
+支持的 API 端点：
+
+    GET /v1/models
+        - 列出所有可用的模型
+        - 包括基座模型和 LoRA 适配器
+
+    POST /v1/load_lora_adapter
+        - 动态加载 LoRA 适配器
+
+    POST /v1/unload_lora_adapter
+        - 卸载 LoRA 适配器
+
+    GET /v1/models/{model_name}
+        - 获取特定模型的详细信息
+
+处理流程：
+
+    HTTP 请求
+        ↓
+    FastAPI 路由
+        ↓
+    参数验证 (Request Validation)
+        ↓
+    OpenAIServingModels 方法处理
+        ↓
+    引擎调用
+        ↓
+    响应格式化 (Response Formatting)
+        ↓
+    JSON 响应
+
+类说明：
+
+    OpenAIServingModels:
+        - 管理模型信息和适配器
+        - 处理模型列表查询
+        - 处理 LoRA 适配器加载/卸载
+
+    LoRA 适配器管理:
+        - 支持静态配置和动态加载
+        - 使用锁防止并发冲突
+        - 支持多种解析器（文件系统、HuggingFace Hub）
+
+使用示例：
+
+    curl http://localhost:8000/v1/models
+
+    响应：
+    {
+        "object": "list",
+        "data": [
+            {
+                "id": "Qwen/Qwen3-0.6B",
+                "object": "model",
+                "created": 1234567890,
+                "owned_by": "vLLM"
+            }
+        ]
+    }
+"""
 
 from asyncio import Lock
 from collections import defaultdict

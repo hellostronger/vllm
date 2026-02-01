@@ -1,5 +1,78 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 聊天完成 API 服务模块
+
+本模块实现了 OpenAI 兼容的 /v1/chat/completions 端点。
+
+API 端点：
+    POST /v1/chat/completions
+        - 主要的聊天完成接口
+        - 支持流式和非流式输出
+        - 支持工具调用
+
+请求格式：
+    {
+        "model": "Qwen/Qwen3-0.6B",
+        "messages": [
+            {"role": "system", "content": "你是一个有帮助的助手"},
+            {"role": "user", "content": "你好"}
+        ],
+        "max_tokens": 100,
+        "temperature": 0.7,
+        "stream": false
+    }
+
+响应格式（非流式）：
+    {
+        "id": "gen-xxx",
+        "object": "chat.completion",
+        "created": 1234567890,
+        "model": "Qwen/Qwen3-0.6B",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "你好！有什么我可以帮助你的吗？"
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 20,
+            "total_tokens": 30
+        }
+    }
+
+核心处理流程：
+
+    HTTP 请求
+        ↓
+    参数验证 (ChatCompletionRequest)
+        ↓
+    消息格式化 (ConversationMessage)
+        ↓
+    模板渲染 (Jinja2 chat template)
+        ↓
+    构建引擎请求 (EngineCoreRequest)
+        ↓
+    调用引擎 (engine_client.generate)
+        ↓
+    处理输出 (RequestOutput)
+        ↓
+    格式化响应 (ChatCompletionResponse)
+        ↓
+    返回 JSON
+
+流式输出 (Server-Sent Events)：
+    data: {"id":"gen-xxx","object":"chat.completion.chunk","created":1234567890,"model":"Qwen/Qwen3-0.6B","choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}
+
+    data: {"id":"gen-xxx","object":"chat.completion.chunk","created":1234567890,"model":"Qwen/Qwen3-0.6B","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}
+
+    data: [DONE]
+"""
 
 import asyncio
 import json

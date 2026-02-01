@@ -1,5 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 离线推理入口模块
+
+本模块提供了 `LLM` 类，是 vLLM 离线推理的主要入口点。
+
+与在线服务的区别：
+    - 在线服务：使用 `vllm serve` 启动 HTTP 服务器，接收 HTTP 请求
+    - 离线推理：直接调用 `LLM` 类，在代码中调用模型
+
+使用流程：
+    1. 创建 LLM 实例（加载模型）
+    2. 准备输入数据
+    3. 调用 generate() 或 step()
+    4. 处理输出结果
+
+与 v1 引擎的关系：
+    LLM 类是对 v1 引擎的高级封装，简化了离线使用场景。
+    底层通过 LLMEngine 和 EngineCore 实现实际推理。
+
+使用示例：
+    from vllm import LLM, SamplingParams
+
+    # 1. 创建引擎实例
+    llm = LLM(model="Qwen/Qwen3-0.6B")
+
+    # 2. 准备输入
+    prompts = ["给我讲个笑话", "什么是人工智能？"]
+
+    # 3. 推理
+    outputs = llm.generate(prompts)
+
+    # 4. 处理结果
+    for output in outputs:
+        print(output.outputs[0].text)
+"""
 
 import itertools
 from collections.abc import Callable, Sequence

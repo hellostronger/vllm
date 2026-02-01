@@ -1,5 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 调度器模块
+
+调度器是 vLLM 引擎的核心组件之一，负责管理请求的执行顺序和资源分配。
+
+核心职责：
+1. 请求队列管理：接收新请求、跟踪请求状态、管理等待队列
+2. 批处理决策：将多个请求组合成批次以提高 GPU 利用率
+3. KV 缓存管理：为请求分配/释放 GPU 显存中的 KV cache 块
+4. 调度策略：实现不同的调度算法（如 FCFS、优先级调度）
+5. 投机解码：支持推测性解码（Speculative Decoding）
+
+调度流程：
+    ┌─────────────────────────────────────────────┐
+    │  1. 添加新请求到等待队列                      │
+    └──────────────────┬──────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────┐
+    │  2. 选择要调度的请求（调度策略）              │
+    └──────────────────┬──────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────┐
+    │  3. 分配 KV Cache 块                        │
+    └──────────────────┬──────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────┐
+    │  4. 构建批次并发送给 Worker                 │
+    └──────────────────┬──────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────┐
+    │  5. 处理输出，释放完成请求的资源              │
+    └─────────────────────────────────────────────┘
+
+与 Worker 的交互：
+    - Scheduler 通过调度输出告知 Worker 本次要执行的请求批次
+    - Worker 执行完后返回输出，Scheduler 更新请求状态
+"""
+
 import itertools
 import time
 from collections import defaultdict, deque
@@ -61,6 +99,21 @@ logger = init_logger(__name__)
 
 
 class Scheduler(SchedulerInterface):
+    """
+    vLLM 调度器类
+
+    调度器是请求调度的核心组件，负责：
+    1. 管理所有进行中的请求
+    2. 决定每轮调度的请求批次
+    3. 分配和管理 KV Cache 块
+    4. 处理请求的完成和取消
+
+    调度策略：
+    - 默认使用 FCFS（先来先服务）策略
+    - 支持优先级调度（priority 参数）
+    - 支持连续批处理（Continuous Batching）
+    """
+
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -71,6 +124,7 @@ class Scheduler(SchedulerInterface):
         include_finished_set: bool = False,
         log_stats: bool = False,
     ) -> None:
+        # ===== 保存配置引用 =====
         self.vllm_config = vllm_config
         self.scheduler_config = vllm_config.scheduler_config
         self.cache_config = vllm_config.cache_config
@@ -80,42 +134,53 @@ class Scheduler(SchedulerInterface):
         self.parallel_config = vllm_config.parallel_config
         self.log_stats = log_stats
         self.observability_config = vllm_config.observability_config
+
+        # ===== KV Cache 指标收集器 =====
         self.kv_metrics_collector: KVCacheMetricsCollector | None = None
         if self.observability_config.kv_cache_metrics:
             self.kv_metrics_collector = KVCacheMetricsCollector(
                 self.observability_config.kv_cache_metrics_sample,
             )
+
+        # ===== 结构化输出管理器 =====
         self.structured_output_manager = structured_output_manager
+
+        # 判断是否为 encoder-decoder 模型（如 T5）
         self.is_encoder_decoder = vllm_config.model_config.is_encoder_decoder
 
-        # include_finished_set controls whether a separate set of finished
-        # request ids should be included in the EngineCoreOutputs returned
-        # by update_from_outputs(). This is currently used in the multi-engine
-        # case to track request lifetimes efficiently.
+        # ===== 已完成请求集合 =====
+        # 用于多引擎场景下跟踪请求生命周期
         self.finished_req_ids_dict: dict[int, set[str]] | None = (
             defaultdict(set) if include_finished_set else None
         )
+        # 上一轮已调度的请求 ID 集合
         self.prev_step_scheduled_req_ids: set[str] = set()
 
-        # Scheduling constraints.
+        # ===== 调度约束配置 =====
+        # 最大同时运行的请求数
         self.max_num_running_reqs = self.scheduler_config.max_num_seqs
+        # 每批最大 token 数
         self.max_num_scheduled_tokens = self.scheduler_config.max_num_batched_tokens
+        # 模型最大上下文长度
         self.max_model_len = vllm_config.model_config.max_model_len
+        # 是否启用 KV Cache 事件追踪
         self.enable_kv_cache_events = (
             self.kv_events_config is not None
             and self.kv_events_config.enable_kv_cache_events
         )
 
-        # Create KVConnector for the Scheduler. Note that each Worker
-        # will have a corresponding KVConnector with Role=WORKER.
-        # KV Connector pushes/pull of remote KVs for P/D and offloading.
+        # ===== KV Connector（用于分布式 KV Cache 传输）=====
+        # KV Connector 用于流水线/分布式并行时的 KV Cache 传输
         self.connector = None
         self.connector_prefix_cache_stats: PrefixCacheStats | None = None
         self.recompute_kv_load_failures = True
+
         if self.vllm_config.kv_transfer_config is not None:
+            # encoder-decoder 模型暂不支持 KV connector
             assert not self.is_encoder_decoder, (
-                "Encoder-decoder models are not currently supported with KV connectors"
+                "Encoder-decoder 模型暂不支持 KV connector"
             )
+            # 创建 SCHEDULER 角色的 KV Connector
             self.connector = KVConnectorFactory.create_connector(
                 config=self.vllm_config,
                 role=KVConnectorRole.SCHEDULER,
@@ -123,29 +188,38 @@ class Scheduler(SchedulerInterface):
             )
             if self.log_stats:
                 self.connector_prefix_cache_stats = PrefixCacheStats()
+
+            # KV 加载失败时的处理策略：recompute（重算）或 error（报错）
             kv_load_failure_policy = (
                 self.vllm_config.kv_transfer_config.kv_load_failure_policy
             )
             self.recompute_kv_load_failures = kv_load_failure_policy == "recompute"
 
+        # ===== KV 事件发布器 =====
         self.kv_event_publisher = EventPublisherFactory.create(
             self.kv_events_config,
             self.parallel_config.data_parallel_index,
         )
+
+        # ===== EC Connector（用于执行控制传输）=====
         self.ec_connector = None
         if self.vllm_config.ec_transfer_config is not None:
             self.ec_connector = ECConnectorFactory.create_connector(
                 config=self.vllm_config, role=ECConnectorRole.SCHEDULER
             )
 
+        # ===== Cache 块配置 =====
         num_gpu_blocks = self.cache_config.num_gpu_blocks
         assert num_gpu_blocks is not None and num_gpu_blocks > 0
 
         self.block_size = block_size
+        # 解码时的上下文并行大小
         self.dcp_world_size = vllm_config.parallel_config.decode_context_parallel_size
+        # 预填充时的上下文并行大小
         self.pcp_world_size = vllm_config.parallel_config.prefill_context_parallel_size
 
-        # req_id -> Request
+        # ===== 请求字典和调度策略 =====
+        # req_id -> Request 的映射
         self.requests: dict[str, Request] = {}
         # Scheduling policy
         try:

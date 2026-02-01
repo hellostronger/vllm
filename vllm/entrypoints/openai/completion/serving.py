@@ -1,5 +1,63 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 文本完成 API 服务模块
+
+本模块实现了 OpenAI 兼容的 /v1/completions 端点。
+
+与 /v1/chat/completions 的区别：
+    - /v1/completions: 原始文本补全（GPT-3 风格）
+    - /v1/chat/completions: 聊天格式补全（GPT-3.5+ 风格）
+
+API 端点：
+    POST /v1/completions
+        - 文本补全接口
+        - 支持流式和非流式输出
+        - 支持 logprobs 选项
+
+请求格式：
+    {
+        "model": "Qwen/Qwen3-0.6B",
+        "prompt": "给我讲个笑话",
+        "max_tokens": 100,
+        "temperature": 0.7,
+        "stream": false
+    }
+
+响应格式（非流式）：
+    {
+        "id": "gen-xxx",
+        "object": "text.completion",
+        "created": 1234567890,
+        "model": "Qwen/Qwen3-0.6B",
+        "choices": [
+            {
+                "index": 0,
+                "text": "从前有座山，山里有只猴...",
+                "logprobs": null,
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 5,
+            "completion_tokens": 20,
+            "total_tokens": 25
+        }
+    }
+
+使用场景：
+    1. 续写文本
+    2. 代码补全
+    3. 填空题
+    4. 创意写作
+
+相关参数：
+    - prompt: 待补全的文本
+    - suffix: 补全后的后缀（用于插入模式）
+    - echo: 是否返回原文（包含在输出中）
+    - logprobs: 返回 top-k token 的概率
+    - best_of: 生成多个结果返回最佳的
+"""
 
 import asyncio
 import time

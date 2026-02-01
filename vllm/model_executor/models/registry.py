@@ -1,8 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
-Whenever you add an architecture to this page, please also update
-`tests/models/registry.py` with example HuggingFace models for it.
+vLLM 模型注册表模块
+
+本模块定义了模型架构到实际实现类的映射。
+
+工作原理：
+    1. vLLM 从 HuggingFace 加载模型配置
+    2. 读取模型的 architecture 字段（如 "LlamaForCausalLM"）
+    3. 在注册表中查找对应的 vLLM 模型类
+    4. 实例化并运行
+
+注册表结构：
+
+    _TEXT_GENERATION_MODELS:
+        - Decoder-only 模型（如 Llama, Qwen, Mistral）
+        - 架构名 -> (vLLM 内部标识符, 实现类名)
+
+    _ENCODER_DECODER_MODELS:
+        - Encoder-Decoder 模型（如 T5, BART）
+        - 架构名 -> (vLLM 内部标识符, 实现类名)
+
+    _MULTIMODAL_MODELS:
+        - 多模态模型（如 LLaVA, Qwen-VL）
+        - 架构名 -> (vLLM 内部标识符, 实现类名)
+
+    _POOLING_MODELS:
+        - 池化模型（如 Embedding, Score）
+        - 架构名 -> (vLLM 内部标识符, 实现类名)
+
+模型映射示例：
+
+    HuggingFace 架构名          vLLM 标识符    实现类
+    ─────────────────────────────────────────────────
+    LlamaForCausalLM           llama          LlamaForCausalLM
+    Qwen2ForCausalLM           qwen2          Qwen2ForCausalLM
+    MistralForCausalLM         mistral        MistralForCausalLM
+    MixtralForCausalLM         mixtral        MixtralForCausalLM
+
+如何添加新模型：
+    1. 在 vllm/model_executor/models/ 下创建新文件
+    2. 实现对应的模型类
+    3. 在 _TEXT_GENERATION_MODELS 字典中添加映射
+    4. 添加测试用例到 tests/models/registry.py
+
+注意事项：
+    添加新模型架构时，请同时更新 tests/models/registry.py
+    以确保测试覆盖。
 """
 
 import importlib

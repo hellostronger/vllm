@@ -1,5 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM KV Cache 管理器模块
+
+本模块负责管理 GPU 显存中的 KV Cache（键值缓存）。
+
+什么是 KV Cache？
+    在 Transformer 推理过程中：
+    - K (Key) 和 V (Value) 是注意力机制的中间结果
+    - 这些值会在生成每个 token 时被重复使用
+    - KV Cache 就是缓存这些值的显存区域
+
+为什么需要分块管理？
+    1. 显存有限 - 无法一次性缓存所有请求的完整上下文
+    2. 动态长度 - 提示词和生成长度都是可变的
+    3. 重复利用 - 相同前缀的请求可以共享 KV Cache
+
+vLLM 的分块策略（PagedAttention）：
+    - 将 KV Cache 划分为固定大小的块（block）
+    - 每个请求占用多个块
+    - 块可以被不同请求共享（前缀缓存）
+    - 块可以在内存不足时置换到 CPU
+
+主要类：
+
+    KVCacheManager:
+        - 管理所有 KV Cache 块的分配和释放
+        - 跟踪块的引用计数
+        - 处理块的共享和置换
+
+    KVCacheBlocks:
+        - 表示一个请求的 KV Cache 块分配结果
+        - 隐藏内部数据结构，提供简洁接口
+
+工作流程：
+    新请求到达
+        ↓
+    1. 检查是否有可用的已分配块
+    ↓
+    2. 计算需要多少新块
+    ↓
+    3. 分配新块（或从置换区回收）
+    ↓
+    4. 返回块分配信息
+    ↓
+    模型使用这些块存储 KV 值
+    ↓
+    请求完成后释放块
+
+显存优化技术：
+    1. Prefix Caching - 共享公共前缀的 KV Cache
+    2. Eviction - 置换不常用的块到 CPU
+    3. Compression - 压缩 KV Cache（可选）
+"""
 
 import itertools
 from collections.abc import Sequence

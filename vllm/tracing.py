@@ -1,5 +1,48 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 分布式追踪模块
+
+本模块集成了 OpenTelemetry (OTel)，用于分布式追踪和可观测性。
+
+追踪用途：
+    1. 性能分析 - 识别瓶颈
+    2. 调试 - 追踪请求流程
+    3. 监控 - 收集延迟、吞吐量指标
+    4. 日志关联 - 将追踪与日志关联
+
+追踪头：
+    - traceparent: W3C 标准追踪头
+    - tracestate: 追踪状态
+
+支持的协议：
+    - OTLP/gRPC (默认)
+    - OTLP/HTTP
+
+Span 属性（用于 LLM 相关追踪）：
+
+    gen_ai.usage.*:
+        - completion_tokens: 生成的 token 数量
+        - prompt_tokens: 提示的 token 数量
+        - num_sequences: 生成的数量
+
+    gen_ai.latency.*:
+        - time_to_first_token: 首 token 延迟
+        - time_in_queue: 排队时间
+        - time_in_scheduler: 调度时间
+        - time_in_model_forward: 前向传播时间
+        - time_in_model_decode: 解码时间
+
+配置示例：
+    # 设置 OTLP 端点
+    export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:4317"
+    export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="grpc"
+
+    # 启动服务
+    vllm serve Qwen/Qwen3-0.6B --otlp-traces-endpoint http://localhost:4317
+
+    # 追踪客户端需要在请求头中包含追踪信息
+"""
 
 import os
 from collections.abc import Mapping

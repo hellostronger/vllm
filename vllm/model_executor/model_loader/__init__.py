@@ -1,5 +1,67 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 模型加载器模块
+
+本模块负责从各种格式加载模型权重到 GPU 显存。
+
+支持的模型加载格式：
+
+    hf (HuggingFace):
+        - 标准 HuggingFace 格式
+        - 支持 .bin, .safetensors 权重文件
+        - 最常用的加载方式
+
+    safetensors:
+        - SafeTensors 格式
+        - 更快更安全的加载
+        - 支持内存映射
+
+    bitsandbytes:
+        - 8-bit/4-bit 量化加载
+        - 减少显存占用
+        - 略微影响精度
+
+    gguf:
+        - GGUF 格式（原 GGML）
+        - 支持多种量化
+        - 用于 llama.cpp 兼容
+
+    tensorizer:
+        - vLLM 自定义序列化格式
+        - 极快的模型加载
+        - 支持远程加载
+
+    dummy:
+        - 虚拟模型（仅用于测试）
+        - 不加载真实权重
+        - 用于调试和基准测试
+
+加载流程：
+    1. 根据 load_format 选择对应的 ModelLoader
+    2. 下载/读取模型权重
+    3. 分配模型内存
+    4. 加载权重到 GPU
+    5. 验证模型完整性
+
+使用示例：
+
+    # 默认加载（HuggingFace 格式）
+    vllm serve Qwen/Qwen3-0.6B
+
+    # SafeTensors 格式
+    vllm serve --load-format safetensors Qwen/Qwen3-0.6B
+
+    # 4-bit 量化加载
+    vllm serve --load-format bitsandbytes Qwen/Qwen3-0.6B
+
+    # Tensorizer 远程加载
+    vllm serve --load-format tensorizer Qwen/Qwen3-0.6B
+
+扩展机制：
+    通过 register_model_loader 可以添加自定义加载器
+    支持第三方格式和自定义序列化方案
+"""
 
 from typing import Literal
 

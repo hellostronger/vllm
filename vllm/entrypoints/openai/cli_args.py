@@ -1,9 +1,68 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
-This file contains the command line arguments for the vLLM's
-OpenAI-compatible server. It is kept in a separate file for documentation
-purposes.
+vLLM OpenAI API 服务器命令行参数模块
+
+本模块定义了 OpenAI 兼容 API 服务器的所有命令行参数。
+
+主要参数分类：
+
+    基础配置:
+        --host: 绑定地址（默认 None，自动选择）
+        --port: 端口号（默认 8000）
+        --uds: Unix Domain Socket 路径（可选）
+        --name: 服务名称
+
+    模型配置:
+        --model: 模型名称或路径
+        --tokenizer: 分词器路径
+        --download-dir: 模型缓存目录
+        --load-format: 模型加载格式
+
+    GPU 配置:
+        --tensor-parallel-size: 张量并行大小（GPU 数）
+        --pipeline-parallel-size: 流水线并行大小
+        --gpu-memory-utilization: GPU 显存利用率
+        --enable-auto-tool-choice: 自动工具选择
+        --tool-call-parser: 工具调用解析器
+
+    推理配置:
+        --max-model-len: 最大序列长度
+        --max-num-batched-tokens: 每批最大 token 数
+        --max-num-seqs: 最大并发序列数
+        --quantization: 量化方法（fp8, awq, gptq 等）
+
+    服务配置:
+        --api-key: API 密钥认证
+        --allowed-origins: 允许的 CORS 源
+        --max-concurrent-requests: 最大并发请求数
+        --disable-frontend-multiprocessing: 禁用前端多进程
+
+    监控配置:
+        --enable-metrics: 启用 Prometheus 指标
+        --metrics-port: 指标端口
+        --otlp-endpoint: OpenTelemetry 端点
+        --served-model-name: 响应中显示的模型名称
+
+常用命令示例：
+
+    # 基本启动
+    vllm serve Qwen/Qwen3-0.6B
+
+    # 自定义端口和地址
+    vllm serve Qwen/Qwen3-0.6B --host 0.0.0.0 --port 8080
+
+    # 多卡推理
+    vllm serve Qwen/Qwen3-0.6B --tensor-parallel-size 2
+
+    # 带认证
+    vllm serve Qwen/Qwen3-0.6B --api-key sk-secret
+
+    # 量化推理
+    vllm serve Qwen/Qwen3-0.6B --quantization awq
+
+    # 长上下文
+    vllm serve Qwen/Qwen3-0.6B --max-model-len 32768
 """
 
 import argparse

@@ -1,5 +1,50 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM OpenAI CLI 交互模块
+
+本模块实现了 `vllm openai` 子命令，提供命令行方式与 OpenAI API 交互。
+
+功能说明：
+    1. 交互式聊天 - 在终端直接与 vLLM 对话
+    2. API 代理 - 将请求转发到 vLLM 服务
+    3. 兼容 OpenAI 格式 - 无需修改现有 OpenAI 客户端代码
+
+使用场景：
+    - 调试和测试 API
+    - 快速验证模型效果
+    - 与 OpenAI SDK 集成测试
+
+工作原理：
+    vllm openai 命令本质上是一个 OpenAI 客户端代理：
+        用户输入
+            ↓
+        OpenAI Python SDK
+            ↓
+        vllm openai 代理
+            ↓
+        vLLM HTTP 服务
+            ↓
+        返回结果
+
+常用命令：
+
+    # 启动交互式聊天（需要先启动服务）
+    vllm serve Qwen/Qwen3-0.6B
+    vllm openai --url http://localhost:8000/v1
+
+    # 使用指定模型
+    vllm openai --url http://localhost:8000/v1 --model-name Qwen/Qwen3-0.6B
+
+    # 设置 API Key
+    export OPENAI_API_KEY="sk-xxx"
+    vllm openai --url http://localhost:8000/v1
+
+交互式命令：
+    /quit 或 /exit - 退出
+    /model <name> - 切换模型
+    /stream on/off - 开关流式输出
+"""
 
 import argparse
 import os

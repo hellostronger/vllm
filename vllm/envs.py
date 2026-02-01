@@ -1,5 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 环境变量模块
+
+本模块定义了 vLLM 所有可配置的环境变量。
+
+使用方式：
+    import vllm.envs as envs
+    if envs.VLLM_USE_FLASHINFER:
+        # 使用 FlashInfer 加速
+
+或在命令行中设置：
+    export VLLM_USE_FLASHINFER=1
+    vllm serve Qwen/Qwen3-0.6B
+
+环境变量分类：
+
+    基础配置:
+        VLLM_HOST_IP          - 服务绑定 IP
+        VLLM_PORT             - 服务端口
+        VLLM_API_KEY          - API 密钥
+
+    GPU 相关:
+        CUDA_VISIBLE_DEVICES  - 指定使用的 GPU
+        VLLM_TARGET_DEVICE    - 目标设备 (cuda/rocm/cpu)
+        VLLM_FLOAT32_MATMUL_PRECISION - 矩阵乘法精度
+
+    内存相关:
+        VLLM_CPU_KVCACHE_SPACE - CPU KV Cache 空间
+        VLLM_CACHE_ROOT        - 缓存根目录
+
+    并行相关:
+        VLLM_PP_LAYER_PARTITION - 流水线并行分层
+        LOCAL_RANK              - 本地 GPU 索引
+
+    性能调优:
+        MAX_JOBS               - 编译并行数
+        NVCC_THREADS           - NVCC 线程数
+        VLLM_FUSED_MOE_CHUNK_SIZE - MoE 层分块大小
+
+    日志与监控:
+        VLLM_LOGGING_LEVEL     - 日志级别
+        VLLM_LOG_STATS_INTERVAL - 统计日志间隔
+        VLLM_TRACE_FUNCTION    - 函数追踪
+
+    多模态:
+        VLLM_IMAGE_FETCH_TIMEOUT   - 图片获取超时
+        VLLM_AUDIO_FETCH_TIMEOUT   - 音频获取超时
+        VLLM_VIDEO_FETCH_TIMEOUT   - 视频获取超时
+        VLLM_MEDIA_LOADING_THREAD_COUNT - 媒体加载线程数
+
+    插件:
+        VLLM_PLUGINS           - 启用的插件列表
+"""
 
 import functools
 import json

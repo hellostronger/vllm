@@ -1,5 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM OpenAI 兼容 API 服务器模块
+
+本模块实现了 OpenAI 兼容的 HTTP API 服务器，支持以下端点：
+- POST /v1/completions - 文本补全
+- POST /v1/chat/completions - 聊天补全
+- POST /v1/embeddings - 文本嵌入
+- GET /v1/models - 列出可用模型
+
+技术架构：
+- 使用 FastAPI 作为 Web 框架
+- 使用 Uvicorn 作为 ASGI 服务器
+- 支持多进程和异步处理
+- 使用 uvloop 加速事件循环
+
+流程说明：
+    HTTP 请求
+        ↓
+    FastAPI 路由解析
+        ↓
+    请求参数验证
+        ↓
+    构建引擎请求
+        ↓
+    引擎推理（同步/异步）
+        ↓
+    响应格式化
+        ↓
+    返回 HTTP 响应
+"""
+
 import importlib
 import inspect
 import multiprocessing
@@ -70,18 +101,38 @@ async def build_async_engine_client(
     disable_frontend_multiprocessing: bool | None = None,
     client_config: dict[str, Any] | None = None,
 ) -> AsyncIterator[EngineClient]:
+    """
+    构建异步引擎客户端的上下文管理器
+
+    这是 API 服务器创建引擎的入口函数，负责：
+    1. 设置多进程通信方式（forkserver）
+    2. 从命令行参数创建引擎配置
+    3. 创建并返回引擎客户端
+
+    参数:
+        args: 命令行参数命名空间
+        usage_context: 使用场景（API 服务器、离线推理等）
+        disable_frontend_multiprocessing: 是否禁用前端多进程
+        client_config: 客户端配置（进程数量、索引等）
+
+    返回:
+        异步迭代器，产出 EngineClient 实例
+    """
+    # ===== 多进程 forkserver 初始化 =====
+    # forkserver 是一种高效的多进程启动方式
+    # 预先导入重模块，避免每个子进程重复导入
     if os.getenv("VLLM_WORKER_MULTIPROC_METHOD") == "forkserver":
-        # The executor is expected to be mp.
-        # Pre-import heavy modules in the forkserver process
-        logger.debug("Setup forkserver with pre-imports")
+        logger.debug("初始化 forkserver，预导入重模块...")
         multiprocessing.set_start_method("forkserver")
         multiprocessing.set_forkserver_preload(["vllm.v1.engine.async_llm"])
         forkserver.ensure_running()
-        logger.debug("Forkserver setup complete!")
+        logger.debug("Forkserver 初始化完成！")
 
-    # Context manager to handle engine_client lifecycle
-    # Ensures everything is shutdown and cleaned up on error/exit
+    # ===== 创建引擎客户端 =====
+    # 上下文管理器确保引擎正确关闭
     engine_args = AsyncEngineArgs.from_cli_args(args)
+
+    # 如果是多 API 服务器模式，设置进程信息
     if client_config:
         engine_args._api_process_count = client_config.get("client_count", 1)
         engine_args._api_process_rank = client_config.get("client_index", 0)

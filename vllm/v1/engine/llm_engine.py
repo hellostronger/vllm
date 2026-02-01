@@ -1,5 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 推理引擎模块
+
+这是 vLLM 的核心引擎类，负责管理整个推理流程。
+
+主要功能：
+1. 请求管理：接收用户的推理请求，调度到引擎核心处理
+2. 批处理优化：将多个请求组合成批次以提高吞吐量
+3. 输出处理：将模型输出转换为用户友好的格式
+4. 统计日志：记录推理过程中的各项指标
+
+架构说明：
+    LLMEngine 是 v1 引擎的包装层，实际推理工作在 EngineCore 中完成。
+    LLMEngine 负责：
+    - 输入预处理（分词、格式转换）
+    - 输出后处理（解码、格式化）
+    - 统计信息收集
+    EngineCore 负责：
+    - 真正的模型推理
+    - KV 缓存管理
+    - 请求调度
+"""
 
 import time
 from collections.abc import Callable, Mapping
@@ -45,7 +67,20 @@ _R = TypeVar("_R", default=Any)
 
 
 class LLMEngine:
-    """Legacy LLMEngine for backwards compatibility."""
+    """
+    vLLM 推理引擎类
+
+    这是用户直接交互的主要入口类（通过 LLM() 或 AsyncLLM 使用），
+    内部通过 EngineCoreClient 与 EngineCore 通信。
+
+    核心职责：
+    1. 请求路由：将用户请求分发到 EngineCore 处理
+    2. 输入处理：预处理分词、多模态数据
+    3. 输出处理：将引擎输出转换为 RequestOutput
+    4. 统计与监控：收集并上报性能指标
+
+    注意：为了向后兼容保留此命名，实际核心逻辑在 EngineCore 中。
+    """
 
     def __init__(
         self,
@@ -59,50 +94,67 @@ class LLMEngine:
         use_cached_outputs: bool = False,
         multiprocess_mode: bool = False,
     ) -> None:
+        # ===== 引擎配置 =====
         self.vllm_config = vllm_config
         self.observability_config = vllm_config.observability_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
 
+        # ===== 日志开关 =====
         self.log_stats = log_stats
 
+        # ===== 数据并行组初始化 =====
         parallel_config = vllm_config.parallel_config
         executor_backend = parallel_config.distributed_executor_backend
 
+        # 判断是否使用外部启动器的数据并行
         self.external_launcher_dp = (
             parallel_config.data_parallel_size > 1
             and executor_backend == "external_launcher"
         )
-        # important: init dp group before init the engine_core
-        # In the decoupled engine case this is handled in EngineCoreProc.
+
+        # 重要：在初始化 engine_core 之前先初始化 dp group
+        # 在解耦引擎情况下，这部分在 EngineCoreProc 中处理
         if (
             not multiprocess_mode
             and parallel_config.data_parallel_size > 1
             and not self.external_launcher_dp
         ):
+            # 初始化数据并行通信组
             self.dp_group = parallel_config.stateless_init_dp_group()
         else:
             self.dp_group = None
+
+        # 用于控制是否执行虚拟批次的标志
         self.should_execute_dummy_batch = False
 
+        # ===== 输入处理器 =====
+        # 负责处理用户输入：分词、多模态数据预处理等
         self.input_processor = InputProcessor(self.vllm_config)
+
+        # I/O 处理器：处理输入输出的特殊格式（如表格数据）
         self.io_processor = get_io_processor(
             self.vllm_config,
             self.model_config.io_processor_plugin,
         )
 
-        # OutputProcessor (convert EngineCoreOutputs --> RequestOutput).
+        # ===== 输出处理器 =====
+        # 将 EngineCore 的原始输出转换为用户友好的 RequestOutput
         self.output_processor = OutputProcessor(
             self.tokenizer,
             log_stats=self.log_stats,
             stream_interval=self.vllm_config.scheduler_config.stream_interval,
         )
+
+        # 如果配置了 OpenTelemetry 追踪，初始化追踪器
         endpoint = self.observability_config.otlp_traces_endpoint
         if endpoint is not None:
             tracer = init_tracer("vllm.llm_engine", endpoint)
             self.output_processor.tracer = tracer
 
-        # EngineCore (gets EngineCoreRequests and gives EngineCoreOutputs)
+        # ===== 引擎核心客户端 =====
+        # EngineCore 是实际执行推理的组件，通过 IPC 与 LLMEngine 通信
+        # 通信方式可以是：同进程、Unix 套接字、HTTP
         self.engine_core = EngineCoreClient.make_client(
             multiprocess_mode=multiprocess_mode,
             asyncio_mode=False,
@@ -111,6 +163,7 @@ class LLMEngine:
             log_stats=self.log_stats,
         )
 
+        # ===== 统计日志管理器 =====
         self.logger_manager: StatLoggerManager | None = None
         if self.log_stats:
             self.logger_manager = StatLoggerManager(
@@ -121,16 +174,15 @@ class LLMEngine:
             )
             self.logger_manager.log_engine_initialized()
 
+        # 兼容 v0：暴露 model_executor 属性
         if not multiprocess_mode:
-            # for v0 compatibility
             self.model_executor = self.engine_core.engine_core.model_executor  # type: ignore
 
+        # 如果使用外部启动器的 DP，复用现有的 DP 组
         if self.external_launcher_dp:
-            # If we use DP in external launcher mode, we reuse the
-            # existing DP group used for data communication.
             self.dp_group = get_dp_group().cpu_group
 
-        # Don't keep the dummy data in memory
+        # 清空多模态缓存占位数据
         self.reset_mm_cache()
 
     @classmethod
@@ -220,20 +272,42 @@ class LLMEngine:
         priority: int = 0,
         prompt_text: str | None = None,
     ) -> None:
-        # Validate the request_id type.
-        if not isinstance(request_id, str):
-            raise TypeError(f"request_id must be a string, got {type(request_id)}")
+        """
+        添加一个推理请求到引擎
 
-        # Process raw inputs into the request.
+        参数处理流程：
+        1. 验证 request_id 类型（必须是字符串）
+        2. 处理输入数据，转换为内部请求格式
+        3. 如果是采样参数 n>1，进行请求分叉（生成多个采样结果）
+        4. 将请求添加到输出处理器和引擎核心
+
+        参数:
+            request_id: 请求的唯一标识符
+            prompt: 用户输入（可以是字符串、TokensPrompt、DataPrompt 等）
+            params: 采样参数或池化参数
+            arrival_time: 请求到达时间（默认当前时间）
+            lora_request: LoRA 适配器请求（可选）
+            tokenization_kwargs: 分词器额外参数
+            trace_headers: 分布式追踪头信息
+            priority: 请求优先级（数值越大优先级越高）
+            prompt_text: 原始提示文本（自动推断，可不传）
+        """
+        # 验证 request_id 类型
+        if not isinstance(request_id, str):
+            raise TypeError(f"request_id 必须是字符串类型，实际得到 {type(request_id)}")
+
+        # 将原始输入处理为内部请求格式
         if isinstance(prompt, EngineCoreRequest):
+            # 如果已经是内部格式，直接使用
             request = prompt
+            # 警告：如果 request_id 不匹配，使用 request 内部的 id
             if request_id != request.request_id:
                 logger.warning_once(
-                    "AsyncLLM.add_request() was passed a request_id parameter that "
-                    "does not match the EngineCoreRequest.request_id attribute. The "
-                    "latter will be used, and the former will be ignored."
+                    "add_request() 传入的 request_id 与 EngineCoreRequest.request_id 不匹配，"
+                    "将使用后者。"
                 )
         else:
+            # 原始输入需要预处理：分词、多模态处理等
             assert prompt_text is None
             request = self.input_processor.process_inputs(
                 request_id,
@@ -245,51 +319,69 @@ class LLMEngine:
                 trace_headers,
                 priority,
             )
+            # 记录原始提示文本用于输出
             if isinstance(prompt, str):
                 prompt_text = prompt
             elif isinstance(prompt, Mapping):
                 prompt_text = cast(str | None, prompt.get("prompt"))
 
+        # 为请求分配 ID
         self.input_processor.assign_request_id(request)
 
-        # Use cloned params that may have been updated in process_inputs()
+        # 使用处理后的参数（可能在 process_inputs 中被更新）
         params = request.params
 
         n = params.n if isinstance(params, SamplingParams) else 1
 
+        # === 单采样情况：直接添加请求 ===
         if n == 1:
-            # Make a new RequestState and queue.
+            # 在输出处理器中创建请求状态
             self.output_processor.add_request(request, prompt_text, None, 0)
-            # Add the request to EngineCore.
+            # 添加到引擎核心开始处理
             self.engine_core.add_request(request)
             return
 
-        # Fan out child requests (for n>1).
+        # === 多采样情况：分叉请求 ===
+        # 当 n>1 时，需要将一个请求拆分为多个子请求
         parent_req = ParentRequest(request)
         for idx in range(n):
+            # 获取子请求信息
             request_id, child_params = parent_req.get_child_info(idx)
+            # 复制请求（最后一个复用原对象以节省内存）
             child_request = request if idx == n - 1 else copy(request)
             child_request.request_id = request_id
             child_request.sampling_params = child_params
 
-            # Make a new RequestState and queue.
+            # 添加到输出处理器和引擎核心
             self.output_processor.add_request(
                 child_request, prompt_text, parent_req, idx
             )
-            # Add the request to EngineCore.
             self.engine_core.add_request(child_request)
 
     def step(self) -> list[RequestOutput | PoolingRequestOutput]:
+        """
+        执行一步推理迭代
+
+        核心执行流程：
+        1. 从 EngineCore 获取本轮输出
+        2. 处理输出（解码、格式化）
+        3. 处理因 stop 条件完成的请求
+        4. 记录统计信息
+
+        返回:
+            本轮产生的可输出结果列表
+        """
+        # 如果需要执行虚拟批次（用于保持 GPU活跃度），先执行
         if self.should_execute_dummy_batch:
             self.should_execute_dummy_batch = False
             self.engine_core.execute_dummy_batch()
             return []
 
-        # 1) Get EngineCoreOutput from the EngineCore.
+        # ===== 步骤 1：从引擎核心获取输出 =====
         with record_function_or_nullcontext("llm_engine step: get_output"):
             outputs = self.engine_core.get_output()
 
-        # 2) Process EngineCoreOutputs.
+        # ===== 步骤 2：处理引擎输出 =====
         with record_function_or_nullcontext("llm_engine step: process_outputs"):
             iteration_stats = IterationStats() if self.log_stats else None
             processed_outputs = self.output_processor.process_outputs(
@@ -297,13 +389,14 @@ class LLMEngine:
                 engine_core_timestamp=outputs.timestamp,
                 iteration_stats=iteration_stats,
             )
+            # 更新调度器统计信息
             self.output_processor.update_scheduler_stats(outputs.scheduler_stats)
 
-        # 3) Abort any reqs that finished due to stop strings.
+        # ===== 步骤 3：处理因 stop 字符串/token 而完成的请求 =====
         with record_function_or_nullcontext("llm_engine step: abort_requests"):
             self.engine_core.abort_requests(processed_outputs.reqs_to_abort)
 
-        # 4) Record stats
+        # ===== 步骤 4：记录统计信息 =====
         with record_function_or_nullcontext("llm_engine step: record_stats"):
             if self.logger_manager is not None and outputs.scheduler_stats is not None:
                 self.logger_manager.record(

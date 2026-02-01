@@ -1,5 +1,59 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 引擎核心模块
+
+本模块是 vLLM v1 引擎的核心实现，包含主推理循环。
+
+EngineCore 与 LLMEngine 的关系：
+
+    LLMEngine (前端)
+        ├── 输入预处理 (InputProcessor)
+        ├── 输出处理 (OutputProcessor)
+        ├── 统计收集 (StatLogger)
+        └── EngineCoreClient (IPC 通信)
+                    ↓
+                    IPC (ZMQ/RPC)
+                    ↓
+    EngineCore (后端)
+        ├── Scheduler (调度器)
+        ├── KVCacheManager (缓存管理)
+        ├── Worker (模型执行)
+        └── Executor (分布式管理)
+
+EngineCore 的核心职责：
+
+    1. 推理循环 (Inner Loop)
+        - 持续从调度器获取待执行批次
+        - 调用 Worker 执行模型前向传播
+        - 处理输出结果
+
+    2. 请求管理
+        - 接收新请求
+        - 跟踪请求状态
+        - 处理完成/取消请求
+
+    3. 资源管理
+        - KV Cache 分配/释放
+        - 内存优化
+        - 分布式通信
+
+进程间通信：
+    - 使用 ZMQ 进行进程间通信
+    - 支持多进程模式下的请求分发
+    - 使用 msgpack 序列化
+
+主循环流程：
+
+    while True:
+        1. 接收调度器输出 (SchedulerOutput)
+        2. 构建批次 (Batching)
+        3. Worker 执行模型 (Model Execution)
+        4. 处理输出 (Output Processing)
+        5. 更新请求状态 (Update Requests)
+        6. 发送结果回 LLMEngine (Send Output)
+"""
+
 import os
 import queue
 import signal

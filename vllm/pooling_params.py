@@ -1,5 +1,55 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 池化参数模块
+
+本模块定义了池化模型（Embedding、分类、评分等）的参数。
+
+池化模型与生成模型的区别：
+
+    生成模型 (Text Generation):
+        - 输入: tokens
+        - 输出: 更多 tokens
+        - 使用 SamplingParams
+
+    池化模型 (Pooling):
+        - 输入: tokens
+        - 输出: 固定维度的向量
+        - 使用 PoolingParams
+
+池化任务类型：
+
+    Embedding (嵌入):
+        - 将文本编码为向量
+        - 用于相似度计算、检索
+        - 支持 dimensions 参数调整输出维度
+        - 支持 normalize 归一化
+
+    Classification (分类):
+        - 文本分类
+        - 输出类别概率分布
+        - 激活函数: softmax
+
+    Score (评分):
+        - 对文本对进行评分
+        - 输出相似度分数
+        - 激活函数: sigmoid
+
+使用示例：
+
+    from vllm import LLM, PoolingParams
+
+    # Embedding 模型
+    llm = LLM(model="BAAI/bge-small-zh-v1.5")
+    outputs = llm.encode("你好，世界！")
+
+    # 带配置的 Embedding
+    params = PoolingParams(
+        normalize=True,      # 归一化向量
+        dimensions=256,      # 截断到 256 维
+    )
+    outputs = llm.encode("文本", pooling_params=params)
+"""
 
 from copy import deepcopy
 from typing import Annotated, Any

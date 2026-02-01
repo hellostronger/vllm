@@ -1,10 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 服务启动模块
+
+本模块实现了 `vllm serve` 子命令，负责启动 OpenAI 兼容的 HTTP API 服务器。
+用户可以通过 HTTP 请求发送推理请求，服务器返回生成的文本结果。
+
+核心功能：
+    1. 解析 serve 命令的参数
+    2. 创建 LLM 引擎实例
+    3. 启动 HTTP 服务器（支持单进程和多进程模式）
+    4. 支持数据并行和负载均衡
+
+使用示例：
+    vllm serve Qwen/Qwen3-0.6B              # 启动单进程服务
+    vllm serve Qwen/Qwen3-0.6B --tp 2       # 启动 2 卡推理
+    vllm serve Qwen/Qwen3-0.6B --headless   # 无头模式（无 HTTP 服务）
+
+启动流程：
+    serve 命令
+        ↓
+    解析参数
+        ↓
+    创建引擎配置 (VllmConfig)
+        ↓
+    启动模式判断
+        ├── 单进程：直接运行 run_server()
+        ├── 多进程：启动多个 API 服务器
+        └── 无头模式：仅运行引擎
+"""
 
 import argparse
 import signal
-
-import uvloop
+import sys
 
 import vllm
 import vllm.envs as envs
@@ -30,39 +58,77 @@ from vllm.v1.utils import APIServerProcessManager, wait_for_completion_or_failur
 
 logger = init_logger(__name__)
 
-DESCRIPTION = """Launch a local OpenAI-compatible API server to serve LLM
-completions via HTTP. Defaults to Qwen/Qwen3-0.6B if no model is specified.
+# 条件导入 uvloop（仅在非 Windows 系统上）
+USE_UVLOOP = False
+if sys.platform != "win32":
+    try:
+        import uvloop
+        USE_UVLOOP = True
+    except ImportError:
+        pass
 
-Search by using: `--help=<ConfigGroup>` to explore options by section (e.g.,
---help=ModelConfig, --help=Frontend)
-  Use `--help=all` to show all available flags at once.
+DESCRIPTION = """启动本地 OpenAI 兼容的 HTTP API 服务器来提供 LLM 推理服务。
+
+如果不指定模型，默认使用 Qwen/Qwen3-0.6B。
+
+提示：使用 `--help=<配置组>` 可以按组查看选项（例如：
+  --help=ModelConfig, --help=Frontend）
+  使用 `--help=all` 可以一次性显示所有可用参数。
 """
 
 
 class ServeSubcommand(CLISubcommand):
-    """The `serve` subcommand for the vLLM CLI."""
+    """
+    Serve 子命令处理器
 
-    name = "serve"
+    负责处理 `vllm serve` 命令，完成以下工作：
+    1. 验证命令行参数
+    2. 根据配置选择运行模式（单进程/多进程/无头）
+    3. 启动相应的服务
+    """
+
+    name = "serve"  # 命令名称
 
     @staticmethod
     def cmd(args: argparse.Namespace) -> None:
-        # If model is specified in CLI (as positional arg), it takes precedence
+        """
+        执行 serve 命令的主逻辑
+
+        参数处理流程：
+        1. 如果用户通过位置参数指定了模型名称，优先使用它
+        2. 检测负载均衡模式（外部/混合/内部）
+        3. 根据 api_server_count 选择运行模式
+
+        参数:
+            args: 解析后的命令行参数命名空间
+
+        返回:
+            无
+        """
+        # ===== 参数预处理 =====
+        # 如果用户在命令行中通过位置参数指定了模型（model_tag），
+        # 它优先于通过选项指定的模型（model）
         if hasattr(args, "model_tag") and args.model_tag is not None:
             args.model = args.model_tag
 
+        # ===== 无头模式处理 =====
+        # 无头模式（headless）表示不启动 HTTP API 服务器，
+        # 只需要运行引擎本身，用于与外部调度系统集成
         if args.headless:
+            # 无头模式下不能同时指定 api_server_count
             if args.api_server_count is not None and args.api_server_count > 0:
                 raise ValueError(
-                    f"--api-server-count={args.api_server_count} cannot be "
-                    "used with --headless (no API servers are started in "
-                    "headless mode)."
+                    f"--api-server-count={args.api_server_count} 不能与 "
+                    "--headless 同时使用（无头模式下不启动 API 服务器）。"
                 )
-            # Default to 0 in headless mode (no API servers)
+            # 无头模式下默认 api_server_count 为 0
             args.api_server_count = 0
 
-        # Detect LB mode for defaulting api_server_count.
-        # External LB: --data-parallel-external-lb or --data-parallel-rank
-        # Hybrid LB: --data-parallel-hybrid-lb or --data-parallel-start-rank
+        # ===== 检测负载均衡模式 =====
+        # vLLM 支持三种负载均衡模式：
+        # 1. 外部 LB（external）：外部负载均衡器（如 Nginx）负责分发请求
+        # 2. 混合 LB（hybrid）：内部 LB 处理本地 GPU，外部 LB 跨节点分发
+        # 3. 内部 LB（internal）：vLLM 自己管理所有请求分发
         is_external_lb = (
             args.data_parallel_external_lb or args.data_parallel_rank is not None
         )
@@ -70,45 +136,59 @@ class ServeSubcommand(CLISubcommand):
             args.data_parallel_hybrid_lb or args.data_parallel_start_rank is not None
         )
 
+        # 不能同时使用两种负载均衡模式
         if is_external_lb and is_hybrid_lb:
             raise ValueError(
-                "Cannot use both external and hybrid data parallel load "
-                "balancing modes. External LB is enabled via "
-                "--data-parallel-external-lb or --data-parallel-rank. "
-                "Hybrid LB is enabled via --data-parallel-hybrid-lb or "
-                "--data-parallel-start-rank. Use one mode or the other."
+                "不能同时使用外部负载均衡和混合负载均衡模式。"
+                "外部 LB 通过 --data-parallel-external-lb 或 --data-parallel-rank 启用。"
+                "混合 LB 通过 --data-parallel-hybrid-lb 或 --data-parallel-start-rank 启用。"
+                "请选择其中一种模式。"
             )
 
-        # Default api_server_count if not explicitly set.
-        # - External LB: Leave as 1 (external LB handles distribution)
-        # - Hybrid LB: Use local DP size (internal LB for local ranks only)
-        # - Internal LB: Use full DP size
+        # ===== 设置默认的 api_server_count =====
+        # api_server_count 表示要启动多少个 API 服务器进程
+        # 如果用户没有明确指定，根据负载均衡模式选择合适的默认值
         if args.api_server_count is None:
             if is_external_lb:
+                # 外部 LB：每个节点只启动 1 个 API 服务器，由外部 LB 分发
                 args.api_server_count = 1
             elif is_hybrid_lb:
+                # 混合 LB：启动与本地 GPU 数量相等的 API 服务器
                 args.api_server_count = args.data_parallel_size_local or 1
                 if args.api_server_count > 1:
                     logger.info(
-                        "Defaulting api_server_count to data_parallel_size_local "
-                        "(%d) for hybrid LB mode.",
+                        "在混合 LB 模式下，默认 api_server_count 为 "
+                        "data_parallel_size_local（%d）。",
                         args.api_server_count,
                     )
             else:
+                # 内部 LB：启动与数据并行规模相等的 API 服务器
                 args.api_server_count = args.data_parallel_size
                 if args.api_server_count > 1:
                     logger.info(
-                        "Defaulting api_server_count to data_parallel_size (%d).",
+                        "默认 api_server_count 为 data_parallel_size（%d）。",
                         args.api_server_count,
                     )
 
+        # ===== 选择运行模式 =====
+        # 根据 api_server_count 决定启动方式：
+        # 1. api_server_count < 1：无头模式（无 HTTP 服务）
+        # 2. api_server_count = 1：单进程模式
+        # 3. api_server_count > 1：多进程模式
         if args.api_server_count < 1:
             run_headless(args)
         elif args.api_server_count > 1:
             run_multi_api_server(args)
         else:
-            # Single API server (this process).
-            uvloop.run(run_server(args))
+            # 单进程模式：直接在当前进程运行 HTTP 服务器
+            # 使用 uvloop 作为事件循环（如果可用）
+            if USE_UVLOOP:
+                import uvloop
+                uvloop.run(run_server(args))
+            else:
+                # Windows 系统或 uvloop 不可用时使用默认的 asyncio 事件循环
+                import asyncio
+                asyncio.run(run_server(args))
 
     def validate(self, args: argparse.Namespace) -> None:
         validate_parsed_serve_args(args)
@@ -297,6 +377,14 @@ def run_api_server_worker_proc(
     set_process_title("APIServer", str(server_index))
     decorate_logs()
 
-    uvloop.run(
-        run_server_worker(listen_address, sock, args, client_config, **uvicorn_kwargs)
-    )
+    # 使用适当的事件循环运行服务器（Windows 兼容）
+    if USE_UVLOOP:
+        import uvloop
+        uvloop.run(
+            run_server_worker(listen_address, sock, args, client_config, **uvicorn_kwargs)
+        )
+    else:
+        import asyncio
+        asyncio.run(
+            run_server_worker(listen_address, sock, args, client_config, **uvicorn_kwargs)
+        )

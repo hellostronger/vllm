@@ -1,6 +1,47 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Logging configuration for vLLM."""
+"""
+vLLM 日志模块
+
+本模块提供了 vLLM 的日志配置和工具。
+
+日志特点：
+    1. 一次性日志 - debug_once, info_once, warning_once
+       同一条消息只打印一次，避免重复刷屏
+
+    2. 分布式日志 - scope 参数
+       控制日志在分布式环境中的打印范围
+       - "process": 每个进程都打印
+       - "global": 只在全局主进程打印
+       - "local": 只在本地主进程打印
+
+    3. 彩色输出 - 根据终端自动启用/禁用
+
+    4. 自定义配置 - 支持从 JSON 文件加载配置
+
+日志级别：
+    DEBUG < INFO < WARNING < ERROR < CRITICAL
+
+默认格式：
+    [级别] 时间戳 [文件:行号] 消息
+
+    例如：
+    INFO 01-30 23:10 [logger.py:218] vLLM engine initialized
+
+使用示例：
+
+    from vllm.logger import init_logger
+
+    logger = init_logger(__name__)
+
+    logger.info("引擎初始化完成")
+    logger.debug_once("这是一个只打印一次的调试信息")
+    logger.warning_once("这是一个只打印一次的警告", scope="global")
+
+    # 启用函数调用追踪（用于调试卡住的问题）
+    from vllm.logger import enable_trace_function_call
+    enable_trace_function_call("/tmp/vllm_trace.log")
+"""
 
 import datetime
 import json

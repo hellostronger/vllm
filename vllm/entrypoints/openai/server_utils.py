@@ -1,5 +1,61 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM OpenAI API 服务器工具模块
+
+本模块提供了 OpenAI API 服务器所需的通用工具和中间件。
+
+主要组件：
+
+    AuthenticationMiddleware (认证中间件):
+        - 验证 HTTP 请求的 Authorization Bearer Token
+        - Token 使用 SHA256 哈希存储（安全性）
+        - 跳过 OPTIONS 请求和 /v1 路径外的请求
+
+    XRequestIdMiddleware (请求 ID 中间件):
+        - 为每个请求生成唯一 ID
+        - 用于请求追踪和问题排查
+        - 支持 X-Request-ID 自定义请求头
+
+    lifespan (生命周期管理):
+        - FastAPI 应用启动/关闭处理
+        - 引擎初始化和清理
+        - 资源管理
+
+    log_response (响应日志):
+        - 记录 API 响应信息
+        - 用于调试和监控
+
+服务器启动流程：
+
+    FastAPI 应用创建
+        ↓
+    添加中间件 (Auth, RequestId, CORS 等)
+        ↓
+    添加路由 (/v1/completions, /v1/chat/completions 等)
+        ↓
+    Uvicorn 服务器启动
+        ↓
+    引擎初始化（异步）
+
+安全性配置：
+    - API Key 认证
+    - CORS 跨域支持
+    - 请求验证
+
+使用示例：
+
+    # 启动带认证的服务
+    export VLLM_API_KEY="sk-xxx"
+    vllm serve Qwen/Qwen3-0.6B
+
+    # 使用 API Key 调用
+    curl http://localhost:8000/v1/chat/completions \
+        -H "Authorization: Bearer sk-xxx" \
+        -H "Content-Type: application/json" \
+        -d '{"messages": [{"role": "user", "content": "你好"}]}'
+"""
+
 import asyncio
 import hashlib
 import json

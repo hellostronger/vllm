@@ -1,5 +1,45 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 输出模块
+
+本模块定义了 vLLM 推理结果的数据结构和类。
+
+主要输出类型：
+
+    RequestOutput: 推理请求的完整输出
+        - 包含一个或多个 CompletionOutput
+        - 包含请求元数据（ID、状态、统计信息等）
+
+    CompletionOutput: 单个生成结果
+        - 生成的文本 (text)
+        - 生成的 token ID 序列 (token_ids)
+        - 对数概率 (logprobs)
+        - 停止原因 (finish_reason, stop_reason)
+        - 专家路由信息 (routed_experts, MoE 模型)
+
+    PoolingOutput: 池化模型的输出
+        - 用于 Embedding 模型
+        - 包含提取的隐藏状态
+
+输出流程：
+    模型推理结果
+        ↓
+    ModelRunnerOutput (内部格式)
+        ↓
+    OutputProcessor 处理
+        ↓
+    RequestOutput (用户可见格式)
+        ↓
+    OpenAI API 响应格式
+
+finish_reason 说明：
+    - "stop": 遇到停止标记（EOS 或自定义 stop 字符串）
+    - "length": 达到最大生成长度
+    - "abort": 被用户取消
+    - "timeout": 超时
+    - None: 仍在生成中
+"""
 
 from collections.abc import MutableSequence
 from collections.abc import Sequence as GenericSequence

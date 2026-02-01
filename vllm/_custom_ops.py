@@ -1,5 +1,49 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 自定义 CUDA 操作模块
+
+本模块封装了所有 vLLM 的 CUDA/C++ 自定义操作（通过 PyTorch 扩展调用）。
+
+核心功能：
+    1. PagedAttention - 分页注意力机制
+    2. Quantization - 量化操作（GPTQ、AWQ、FP8 等）
+    3. Activation - 激活函数（SiLU、GELU 等）
+    4. LayerNorm - 层归一化变体
+    5. MoE - 混合专家路由
+
+操作调用流程：
+    Python 函数调用
+        ↓
+    本模块的包装函数
+        ↓
+    torch.ops._C.原生CUDA内核
+        ↓
+    GPU 执行
+
+注意：
+    这些函数调用的是 csrc/ 目录中实现的 CUDA/CMake 构建的扩展。
+    如果没有正确编译，这些调用会失败。
+
+主要操作类型：
+
+    Paged Attention（分页注意力）:
+        paged_attention_v1/v2 - 标准的 PagedAttention 实现
+        用于 KV Cache 的高效内存管理
+
+    Cache Operations（缓存操作）:
+        reshape_and_cache - 将新计算的 KV Cache 存入分页内存
+        copy_cache - 复制 KV Cache 块
+
+    Quantization（量化）:
+        gptq_marlin_gemm - INT4 量化推理
+        awq_gemm - AWQ 量化推理
+        fp8_gemm - FP8 量化推理
+
+    MoE Operations:
+        topk_softmax - 计算专家选择概率
+        moe_align_block_size - MoE 块对齐
+"""
 
 from typing import TYPE_CHECKING, Literal
 

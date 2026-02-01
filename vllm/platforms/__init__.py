@@ -1,5 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 平台抽象模块
+
+本模块提供了对不同硬件加速器的抽象支持。
+
+支持平台：
+
+    CUDA (NVIDIA):
+        - 使用 NVIDIA GPU 进行推理
+        - 支持 TensorRT、CUDA Graph 优化
+        - 支持多 GPU 并行
+
+    ROCm (AMD):
+        - 使用 AMD GPU 进行推理
+        - 类似 CUDA 的编程模型
+
+    CPU:
+        - 使用 CPU 进行推理
+        - 无需 GPU 硬件
+        - 性能较低，适合测试
+
+    TPU (Google):
+        - 使用 Google TPU 进行推理
+        - 通过 Pathways 代理支持
+
+    XPU (Intel):
+        - 使用 Intel GPU/NPU 进行推理
+
+平台检测流程：
+    1. 检查环境变量 (VLLM_TARGET_DEVICE)
+    2. 检测 CUDA (nvidia-smi / pynvml)
+    3. 检测 ROCm (rocm-smi)
+    4. 检测 TPU (libtpu)
+    5. 默认回退到 CPU
+
+平台抽象接口 Platform:
+    - device_name: 设备名称
+    - supported_dtypes: 支持的数据类型 (fp16, bf16, fp8, etc.)
+    - default_device: 默认设备
+    - get_device_capability: 获取设备能力
+
+使用示例：
+    from vllm import platforms
+
+    current_platform = platforms.current_platform
+    print(f"当前平台: {current_platform.device_name}")
+"""
 import logging
 import traceback
 from itertools import chain

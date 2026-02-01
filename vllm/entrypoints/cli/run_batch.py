@@ -1,5 +1,46 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+vLLM 批量离线推理模块
+
+本模块实现了 `vllm run-batch` 子命令，用于离线批量处理推理任务。
+
+使用场景：
+    - 处理大量提示词的批量推理
+    - 将结果写入文件（JSONL 格式）
+    - 无需启动 HTTP 服务
+    - 支持本地文件和 HTTP 输入输出
+
+输入格式 (INPUT.jsonl):
+    {"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "你好"}]}
+    {"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "再见"}]}
+
+输出格式 (OUTPUT.jsonl):
+    {"id": "gen-xxx", "object": "chat.completion", "choices": [...], "usage": {...}}
+
+支持的功能：
+    - 文本生成 (Chat Completion)
+    - Embedding 计算
+    - 流式输出 (可选)
+    - 重复批处理 (LoRA 适配器)
+
+常用命令：
+
+    # 基本用法
+    vllm run-batch -i input.jsonl -o output.jsonl --model Qwen/Qwen3-0.6B
+
+    # 启用 Prometheus 监控
+    vllm run-batch -i input.jsonl -o output.jsonl --model Qwen/Qwen3-0.6B --enable-metrics
+
+    # 指定指标端口
+    vllm run-batch -i input.jsonl -o output.jsonl --model Qwen/Qwen3-0.6B --port 8080
+
+与在线服务的区别：
+    - 无需启动 HTTP 服务
+    - 适合大批量离线处理
+    - 输入输出通过文件传递
+    - 内存占用更可控
+"""
 
 import argparse
 import asyncio

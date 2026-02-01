@@ -1,6 +1,63 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Sampling parameters for text generation."""
+"""
+vLLM 采样参数模块
+
+本模块定义了文本生成过程中的各种采样参数。
+
+采样类型说明：
+
+    Greedy Sampling (贪心采样):
+        - 每一步选择概率最高的 token
+        - 确定性输出，重复性高
+
+    Random Sampling (随机采样):
+        - 按概率分布随机选择 token
+        - 多样性高，但可能生成低质量文本
+
+    Random Seed Sampling (带种子随机采样):
+        - 使用指定随机种子，保证可复现
+
+主要参数：
+
+    n: 采样数量
+        - 生成 n 个独立的结果
+        - 用于 beam search 或并行采样
+
+    max_tokens: 最大生成长度
+        - 单次生成的最大 token 数量
+        - 默认为生模型的最大长度
+
+    temperature: 温度参数
+        - 控制概率分布的平滑程度
+        - 越高越随机，越低越确定
+        - temperature=0 等同于贪心采样
+
+    top_p: Top-p 采样
+        - 累积概率达到 p 的最小 token 集合
+        - 过滤低概率 token
+
+    top_k: Top-k 采样
+        - 只考虑概率最高的 k 个 token
+        - 防止采样到极低概率的 token
+
+    presence_penalty / frequency_penalty:
+        - 惩罚重复 token 的出现
+        - 用于减少重复生成
+
+    stop / stop_token_ids:
+        - 停止生成的标记
+        - 可以是字符串或 token ID
+
+使用示例：
+    params = SamplingParams(
+        n=3,
+        temperature=0.7,
+        top_p=0.9,
+        max_tokens=100,
+        stop=["停止词"]
+    )
+"""
 
 import copy
 from dataclasses import field
